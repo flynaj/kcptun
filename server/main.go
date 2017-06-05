@@ -19,6 +19,7 @@ import (
 	"github.com/urfave/cli"
 	kcp "github.com/xtaci/kcp-go"
 	"github.com/xtaci/smux"
+	"github.com/armon/go-socks5"
 )
 
 var (
@@ -242,6 +243,10 @@ func main() {
 			Value: "", // when the value is not empty, the config path must exists
 			Usage: "config from json file, which will override the command from shell",
 		},
+		cli.BoolFlag{
+			Name:  "socks5",
+			Usage: "start socks5 server on :8088",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		config := Config{}
@@ -268,7 +273,8 @@ func main() {
 		config.SnmpLog = c.String("snmplog")
 		config.SnmpPeriod = c.Int("snmpperiod")
 		config.Pprof = c.Bool("pprof")
-
+        	config.Socks5 = c.Bool("socks5")
+		
 		if c.String("c") != "" {
 			//Now only support json config file
 			err := parseJSONConfig(&config, c.String("c"))
@@ -342,6 +348,7 @@ func main() {
 		log.Println("snmplog:", config.SnmpLog)
 		log.Println("snmpperiod:", config.SnmpPeriod)
 		log.Println("pprof:", config.Pprof)
+        	log.Println("socks5:", config.Socks5)
 
 		if err := lis.SetDSCP(config.DSCP); err != nil {
 			log.Println("SetDSCP:", err)
@@ -357,7 +364,17 @@ func main() {
 		if config.Pprof {
 			go http.ListenAndServe(":6060", nil)
 		}
+		if config.Socks5 {
+			conf := &socks5.Config{}
+            		server, err := socks5.New(conf)
+            		if err != nil {
+                		log.Println(err)
+            		}
 
+  		          // Create SOCKS5 proxy on localhost port 8088
+			 go server.ListenAndServe("tcp", "127.0.0.1:8088")
+		}
+	
 		for {
 			if conn, err := lis.AcceptKCP(); err == nil {
 				log.Println("remote address:", conn.RemoteAddr())
