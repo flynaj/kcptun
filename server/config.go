@@ -30,6 +30,7 @@ type Config struct {
 	SnmpLog      string `json:"snmplog"`
 	SnmpPeriod   int    `json:"snmpperiod"`
 	Pprof        bool   `json:"pprof"`
+	Quiet        bool   `json:"quiet"`
 	Socks5       bool   `json:"socks5"`
 
 }
