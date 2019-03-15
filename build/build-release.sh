@@ -1,4 +1,5 @@
 #!/bin/bash
+export GO111MODULE=on
 sum="sha1sum"
 
 if ! hash sha1sum 2>/dev/null; then
@@ -46,11 +47,18 @@ if $UPX; then upx -9 client_linux_arm* server_linux_arm*;fi
 tar -zcf kcptun-linux-arm-$VERSION.tar.gz client_linux_arm* server_linux_arm*
 $sum kcptun-linux-arm-$VERSION.tar.gz
 
+# ARM64
+env CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_arm64  github.com/flynaj/kcptun/client
+env CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o server_linux_arm64  github.com/flynaj/kcptun/server
+if $UPX; then upx -9 client_linux_arm64 server_linux_arm64;fi
+tar -zcf kcptun-linux-arm64-$VERSION.tar.gz client_linux_arm64 server_linux_arm64
+$sum kcptun-linux-arm64-$VERSION.tar.gz
+
 #MIPS32LE
-env CGO_ENABLED=0 GOOS=linux GOARCH=mipsle go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_mipsle github.com/flynaj/kcptun/client
-env CGO_ENABLED=0 GOOS=linux GOARCH=mipsle go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o server_linux_mipsle github.com/flynaj/kcptun/server
-env CGO_ENABLED=0 GOOS=linux GOARCH=mips go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_mips github.com/flynaj/kcptun/client
-env CGO_ENABLED=0 GOOS=linux GOARCH=mips go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o server_linux_mips github.com/flynaj/kcptun/server
+env CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_mipsle github.com/flynaj/kcptun/client
+env CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o server_linux_mipsle github.com/flynaj/kcptun/server
+env CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o client_linux_mips github.com/flynaj/kcptun/client
+env CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -ldflags "$LDFLAGS" -gcflags "$GCFLAGS" -o server_linux_mips github.com/flynaj/kcptun/server
 
 if $UPX; then upx -9 client_linux_mips* server_linux_mips*;fi
 tar -zcf kcptun-linux-mipsle-$VERSION.tar.gz client_linux_mipsle server_linux_mipsle
