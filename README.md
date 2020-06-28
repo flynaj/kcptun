@@ -8,13 +8,11 @@
 [4]: https://travis-ci.org/xtaci/kcptun
 [5]: https://goreportcard.com/badge/github.com/xtaci/kcptun
 [6]: https://goreportcard.com/report/github.com/xtaci/kcptun
-[7]: https://img.shields.io/badge/license-MIT-blue.svg
-[8]: https://raw.githubusercontent.com/xtaci/kcptun/master/LICENSE.md
-[11]: https://img.shields.io/badge/license-MIT-blue.svg
+[11]: https://img.shields.io/github/license/xtaci/kcptun
 [12]: LICENSE.md
-[13]: https://img.shields.io/github/release/xtaci/kcptun.svg
+[13]: https://img.shields.io/github/v/release/xtaci/kcptun?color=orange
 [14]: https://github.com/xtaci/kcptun/releases/latest
-[15]: https://img.shields.io/github/downloads/xtaci/kcptun/total.svg?maxAge=1800
+[15]: https://img.shields.io/github/downloads/xtaci/kcptun/total.svg?maxAge=1800&color=red
 [16]: https://github.com/xtaci/kcptun/releases
 [17]: https://img.shields.io/badge/KCP-Powered-blue.svg
 [18]: https://github.com/skywind3000/kcp
@@ -22,6 +20,15 @@
 <img src="kcptun.png" alt="kcptun" height="300px"/>
 
 > *Disclaimer: kcptun maintains a single website — [github.com/xtaci/kcptun](https://github.com/xtaci/kcptun). Any websites other than [github.com/xtaci/kcptun](https://github.com/xtaci/kcptun) are not endorsed by xtaci.*
+
+### Requirements
+
+| Target | Minimum | Recommended |
+| --- | --- | --- |
+| System | aix darwin dragonfly freebsd linux netbsd openbsd solaris windows | linux |
+| Memory | >20MB | >32MB |
+| CPU | ANY | amd64 with AES-NI & AVX2 |
+
 
 ### QuickStart
 
@@ -59,10 +66,13 @@ which tunnels the original connection:
 
 > Application -> Target Server(8388/tcp) 
 
-### Install from source
+### Build from source
 
 ```
-$go get -u github.com/xtaci/kcptun/...
+$ git clone https://github.com/xtaci/kcptun.git
+$ cd kcptun
+$ ./build-release.sh
+$ cd build
 ```
 
 All precompiled releases are genereated from `build-release.sh` script.
@@ -105,6 +115,8 @@ All precompiled releases are genereated from `build-release.sh` script.
 Since streams are multiplexed into a single physical channel, head of line blocking may appear under certain circumstances, by
 increasing `-smuxbuf` to a larger value (default 4MB) may mitigate this problem, obviously this will costs more memory.
 
+For versions >= v20190924, you can switch to smux version 2, smux v2 has options to limit per-stream memory usage, now set `-smuxver 2` to enable smux v2, and adjust `-streambuf` to limit per-stream memory usage, eg: `-streambuf 2097152` can limit per-stream memory usage to 2MB. By limiting stream buffer on the receiver side, a back-pressure will be conducted to the sender and limits reading, and finally prevent source from sending too much data to occupy every bits of buffer along the link. (Setting -smuxver **MUST** be **IDENTICAL** on both side, default is 1. )
+
 #### Slow Devices
 
 kcptun made use of **ReedSolomon-Codes** to recover lost packets, which requires massive amount of computation, a low-end ARM device cannot satisfy kcptun well. To unleash the full potential of kcptun, a multi-core x86 homeserver CPU like AMD Opteron is recommended.
@@ -119,7 +131,7 @@ If you insist on running under some ARM routers, you'd better turn off `FEC` and
 #### Usage
 
 ```
-xtaci@gw:~$ ./client_linux_amd64 -h
+➜  ~ ./client_linux_amd64 -h
 NAME:
    kcptun - client(with SMUX)
 
@@ -127,10 +139,10 @@ USAGE:
    client_linux_amd64 [global options] command [command options] [arguments...]
 
 VERSION:
-   20190409
+   20190924
 
 COMMANDS:
-     help, h  Shows a list of commands or help for one command
+   help, h  Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
    --localaddr value, -l value      local listen address (default: ":12948")
@@ -149,17 +161,20 @@ GLOBAL OPTIONS:
    --dscp value                     set DSCP(6bit) (default: 0)
    --nocomp                         disable compression
    --sockbuf value                  per-socket buffer in bytes (default: 4194304)
+   --smuxver value                  specify smux version, available 1,2 (default: 1)
    --smuxbuf value                  the overall de-mux buffer in bytes (default: 4194304)
+   --streambuf value                per stream receive buffer in bytes, smux v2+ (default: 2097152)
    --keepalive value                seconds between heartbeats (default: 10)
    --snmplog value                  collect snmp to file, aware of timeformat in golang, like: ./snmp-20060102.log
    --snmpperiod value               snmp collect period, in seconds (default: 60)
    --log value                      specify a log file to output, default goes to stderr
    --quiet                          to suppress the 'stream open/close' messages
+   --tcp                            to emulate a TCP connection(linux)
    -c value                         config from json file, which will override the command from shell
    --help, -h                       show help
    --version, -v                    print the version
    
-xtaci@gw:~$ ./server_linux_amd64 -h
+➜  ~ ./server_linux_amd64 -h
 NAME:
    kcptun - server(with SMUX)
 
@@ -167,14 +182,14 @@ USAGE:
    server_linux_amd64 [global options] command [command options] [arguments...]
 
 VERSION:
-   20190409
+   20190924
 
 COMMANDS:
-     help, h  Shows a list of commands or help for one command
+   help, h  Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
    --listen value, -l value         kcp server listen address (default: ":29900")
-   --target value, -t value         target server address (default: "127.0.0.1:12948")
+   --target value, -t value         target server address, or path/to/unix_socket (default: "127.0.0.1:12948")
    --key value                      pre-shared secret between client and server (default: "it's a secrect") [$KCPTUN_KEY]
    --crypt value                    aes, aes-128, aes-192, salsa20, blowfish, twofish, cast5, 3des, tea, xtea, xor, sm4, none (default: "aes")
    --mode value                     profiles: fast3, fast2, fast, normal, manual (default: "fast")
@@ -186,13 +201,16 @@ GLOBAL OPTIONS:
    --dscp value                     set DSCP(6bit) (default: 0)
    --nocomp                         disable compression
    --sockbuf value                  per-socket buffer in bytes (default: 4194304)
+   --smuxver value                  specify smux version, available 1,2 (default: 1)
    --smuxbuf value                  the overall de-mux buffer in bytes (default: 4194304)
+   --streambuf value                per stream receive buffer in bytes, smux v2+ (default: 2097152)
    --keepalive value                seconds between heartbeats (default: 10)
    --snmplog value                  collect snmp to file, aware of timeformat in golang, like: ./snmp-20060102.log
    --snmpperiod value               snmp collect period, in seconds (default: 60)
    --pprof                          start profiling server on :6060
    --log value                      specify a log file to output, default goes to stderr
    --quiet                          to suppress the 'stream open/close' messages
+   --tcp                            to emulate a TCP connection(linux)
    -c value                         config from json file, which will override the command from shell
    --help, -h                       show help
    --version, -v                    print the version
@@ -346,6 +364,7 @@ The parameters below **MUST** be **IDENTICAL** on **BOTH** side:
 1. -nocomp
 1. -datashard
 1. -parityshard
+1. -smuxver
 
 ### References
 
@@ -366,14 +385,5 @@ The parameters below **MUST** be **IDENTICAL** on **BOTH** side:
 1. https://en.wikipedia.org/wiki/Noisy-channel_coding_theorem -- Noisy channel coding theorem
 1. https://zhuanlan.zhihu.com/p/53849089 -- kcptun开发小记
 
-### Donate 
-
-via Ethereum(ETH): Address: 0x2e4b43ab3d0983da282592571eef61ae5e60f726 , Or scan here:
-
-<img src="0x2e4b43ab3d0983da282592571eef61ae5e60f726.png" alt="kcptun" height="120px" /> 
-
-via WeChat
-
-<img src="wechat_donate.jpg" alt="kcptun" height="120px" /> 
 
 （注意：我没有任何社交网站的账号，请小心骗子。）

@@ -8,35 +8,38 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"sync"
 	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
-	kcp "github.com/xtaci/kcp-go"
+	kcp "github.com/xtaci/kcp-go/v5"
 	"github.com/xtaci/kcptun/generic"
 	"github.com/xtaci/smux"
 )
 
-// SALT is use for pbkdf2 key expansion
-const SALT = "kcp-go"
+const (
+	// SALT is use for pbkdf2 key expansion
+	SALT = "kcp-go"
+	// maximum supported smux version
+	maxSmuxVer = 2
+	// stream copy buffer size
+	bufSize = 4096
+)
 
 // VERSION is injected by buildflags
 var VERSION = "SELFBUILD"
 
-// A pool for stream copying
-var xmitBuf sync.Pool
-
-func handleClient(sess *smux.Session, p1 net.Conn, quiet bool) {
+// handleClient aggregates connection p1 on mux with 'writeLock'
+func handleClient(session *smux.Session, p1 net.Conn, quiet bool) {
 	logln := func(v ...interface{}) {
 		if !quiet {
 			log.Println(v...)
 		}
 	}
 	defer p1.Close()
-	p2, err := sess.OpenStream()
+	p2, err := session.OpenStream()
 	if err != nil {
 		logln(err)
 		return
@@ -48,21 +51,19 @@ func handleClient(sess *smux.Session, p1 net.Conn, quiet bool) {
 	defer logln("stream closed", "in:", p1.RemoteAddr(), "out:", fmt.Sprint(p2.RemoteAddr(), "(", p2.ID(), ")"))
 
 	// start tunnel & wait for tunnel termination
-	streamCopy := func(dst io.Writer, src io.ReadCloser) chan struct{} {
-		die := make(chan struct{})
-		go func() {
-			buf := xmitBuf.Get().([]byte)
-			generic.CopyBuffer(dst, src, buf)
-			xmitBuf.Put(buf)
-			close(die)
-		}()
-		return die
+	streamCopy := func(dst io.Writer, src io.ReadCloser) {
+		if _, err := generic.Copy(dst, src); err != nil {
+			// report protocol error
+			if err == smux.ErrInvalidProtocol {
+				log.Println("smux", err, "in:", p1.RemoteAddr(), "out:", fmt.Sprint(p2.RemoteAddr(), "(", p2.ID(), ")"))
+			}
+		}
+		p1.Close()
+		p2.Close()
 	}
 
-	select {
-	case <-streamCopy(p1, p2):
-	case <-streamCopy(p2, p1):
-	}
+	go streamCopy(p1, p2)
+	streamCopy(p2, p1)
 }
 
 func checkError(err error) {
@@ -77,9 +78,6 @@ func main() {
 	if VERSION == "SELFBUILD" {
 		// add more log flags for debugging
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
-	}
-	xmitBuf.New = func() interface{} {
-		return make([]byte, 32768)
 	}
 
 	myApp := cli.NewApp()
@@ -193,9 +191,19 @@ func main() {
 			Usage: "per-socket buffer in bytes",
 		},
 		cli.IntFlag{
+			Name:  "smuxver",
+			Value: 1,
+			Usage: "specify smux version, available 1,2",
+		},
+		cli.IntFlag{
 			Name:  "smuxbuf",
 			Value: 4194304,
 			Usage: "the overall de-mux buffer in bytes",
+		},
+		cli.IntFlag{
+			Name:  "streambuf",
+			Value: 2097152,
+			Usage: "per stream receive buffer in bytes, smux v2+",
 		},
 		cli.IntFlag{
 			Name:  "keepalive",
@@ -255,6 +263,8 @@ func main() {
 		config.NoCongestion = c.Int("nc")
 		config.SockBuf = c.Int("sockbuf")
 		config.SmuxBuf = c.Int("smuxbuf")
+		config.StreamBuf = c.Int("streambuf")
+		config.SmuxVer = c.Int("smuxver")
 		config.KeepAlive = c.Int("keepalive")
 		config.Log = c.String("log")
 		config.SnmpLog = c.String("snmplog")
@@ -292,8 +302,37 @@ func main() {
 		listener, err := net.ListenTCP("tcp", addr)
 		checkError(err)
 
+		log.Println("smux version:", config.SmuxVer)
+		log.Println("listening on:", listener.Addr())
+		log.Println("encryption:", config.Crypt)
+		log.Println("nodelay parameters:", config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
+		log.Println("remote address:", config.RemoteAddr)
+		log.Println("sndwnd:", config.SndWnd, "rcvwnd:", config.RcvWnd)
+		log.Println("compression:", !config.NoComp)
+		log.Println("mtu:", config.MTU)
+		log.Println("datashard:", config.DataShard, "parityshard:", config.ParityShard)
+		log.Println("acknodelay:", config.AckNodelay)
+		log.Println("dscp:", config.DSCP)
+		log.Println("sockbuf:", config.SockBuf)
+		log.Println("smuxbuf:", config.SmuxBuf)
+		log.Println("streambuf:", config.StreamBuf)
+		log.Println("keepalive:", config.KeepAlive)
+		log.Println("conn:", config.Conn)
+		log.Println("autoexpire:", config.AutoExpire)
+		log.Println("scavengettl:", config.ScavengeTTL)
+		log.Println("snmplog:", config.SnmpLog)
+		log.Println("snmpperiod:", config.SnmpPeriod)
+		log.Println("quiet:", config.Quiet)
+		log.Println("tcp:", config.TCP)
+
+		// parameters check
+		if config.SmuxVer > maxSmuxVer {
+			log.Fatal("unsupported smux version:", config.SmuxVer)
+		}
+
 		log.Println("initiating key derivation")
 		pass := pbkdf2.Key([]byte(config.Key), []byte(SALT), 4096, 32, sha1.New)
+		log.Println("key derivation done")
 		var block kcp.BlockCrypt
 		switch config.Crypt {
 		case "sm4":
@@ -325,31 +364,6 @@ func main() {
 			block, _ = kcp.NewAESBlockCrypt(pass)
 		}
 
-		log.Println("listening on:", listener.Addr())
-		log.Println("encryption:", config.Crypt)
-		log.Println("nodelay parameters:", config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
-		log.Println("remote address:", config.RemoteAddr)
-		log.Println("sndwnd:", config.SndWnd, "rcvwnd:", config.RcvWnd)
-		log.Println("compression:", !config.NoComp)
-		log.Println("mtu:", config.MTU)
-		log.Println("datashard:", config.DataShard, "parityshard:", config.ParityShard)
-		log.Println("acknodelay:", config.AckNodelay)
-		log.Println("dscp:", config.DSCP)
-		log.Println("sockbuf:", config.SockBuf)
-		log.Println("smuxbuf:", config.SmuxBuf)
-		log.Println("keepalive:", config.KeepAlive)
-		log.Println("conn:", config.Conn)
-		log.Println("autoexpire:", config.AutoExpire)
-		log.Println("scavengettl:", config.ScavengeTTL)
-		log.Println("snmplog:", config.SnmpLog)
-		log.Println("snmpperiod:", config.SnmpPeriod)
-		log.Println("quiet:", config.Quiet)
-		log.Println("tcp:", config.TCP)
-
-		smuxConfig := smux.DefaultConfig()
-		smuxConfig.MaxReceiveBuffer = config.SmuxBuf
-		smuxConfig.KeepAliveInterval = time.Duration(config.KeepAlive) * time.Second
-
 		createConn := func() (*smux.Session, error) {
 			kcpconn, err := dial(&config, block)
 			if err != nil {
@@ -371,6 +385,16 @@ func main() {
 			if err := kcpconn.SetWriteBuffer(config.SockBuf); err != nil {
 				log.Println("SetWriteBuffer:", err)
 			}
+			log.Println("smux version:", config.SmuxVer, "on connection:", kcpconn.LocalAddr(), "->", kcpconn.RemoteAddr())
+			smuxConfig := smux.DefaultConfig()
+			smuxConfig.Version = config.SmuxVer
+			smuxConfig.MaxReceiveBuffer = config.SmuxBuf
+			smuxConfig.MaxStreamBuffer = config.StreamBuf
+			smuxConfig.KeepAliveInterval = time.Duration(config.KeepAlive) * time.Second
+
+			if err := smux.VerifyConfig(smuxConfig); err != nil {
+				log.Fatalf("%+v", err)
+			}
 
 			// stream multiplex
 			var session *smux.Session
@@ -382,7 +406,6 @@ func main() {
 			if err != nil {
 				return nil, errors.Wrap(err, "createConn()")
 			}
-			log.Println("connection:", kcpconn.LocalAddr(), "->", kcpconn.RemoteAddr())
 			return session, nil
 		}
 
